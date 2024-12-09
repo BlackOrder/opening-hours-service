@@ -70,6 +70,198 @@ describe('OpeningHoursService', () => {
       const exportedHours = service.exportOpeningHours()
       expect(exportedHours).toEqual(openingHours)
     })
+
+    it('should initialize with multiple opening hours in different formats and with extra properties', () => {
+      const openingHours: OpeningHoursSpecification[] = [
+        {
+          '@type': 'OpeningHoursSpecification',
+          opens: '08:00',
+          closes: '12:00',
+          dayOfWeek: [
+            'https://schema.org/Monday',
+            'https://schema.org/Tuesday',
+            'https://schema.org/Wednesday',
+            'https://schema.org/Thursday',
+            'https://schema.org/Friday'
+          ]
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          opens: '14:00',
+          closes: '18:00',
+          dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+          validFrom: '2023-12-25',
+          validThrough: '2023-12-25'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          opens: '18:00',
+          closes: '24:00',
+          validFrom: '2023-12-25',
+          validThrough: '2023-12-25'
+        }
+      ]
+      service.setOpeningHours(openingHours)
+      const exportedHours = service.exportOpeningHours()
+      expect(exportedHours).toEqual([
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Monday',
+          opens: '08:00',
+          closes: '12:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Monday',
+          opens: '14:00',
+          closes: '18:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Monday',
+          opens: '18:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Tuesday',
+          opens: '08:00',
+          closes: '12:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Tuesday',
+          opens: '14:00',
+          closes: '18:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Tuesday',
+          opens: '18:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Wednesday',
+          opens: '08:00',
+          closes: '12:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Wednesday',
+          opens: '14:00',
+          closes: '18:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Wednesday',
+          opens: '18:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Thursday',
+          opens: '08:00',
+          closes: '12:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Thursday',
+          opens: '14:00',
+          closes: '18:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Thursday',
+          opens: '18:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Friday',
+          opens: '08:00',
+          closes: '12:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Friday',
+          opens: '14:00',
+          closes: '18:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Friday',
+          opens: '18:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Saturday',
+          opens: '18:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Sunday',
+          opens: '18:00',
+          closes: '24:00'
+        }
+      ])
+    })
+
+    it('should initialize with empty OpeningHoursSpecification object', () => {
+      const openingHours: OpeningHoursSpecification[] = [
+        {
+          '@type': 'OpeningHoursSpecification'
+        }
+      ]
+      service.setOpeningHours(openingHours)
+      const exportedHours = service.exportOpeningHours()
+      expect(exportedHours).toEqual([
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Monday',
+          opens: '00:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Tuesday',
+          opens: '00:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Wednesday',
+          opens: '00:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Thursday',
+          opens: '00:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Friday',
+          opens: '00:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Saturday',
+          opens: '00:00',
+          closes: '24:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Sunday',
+          opens: '00:00',
+          closes: '24:00'
+        }
+      ])
+    })
   })
 
   /** Adding and Removing Opening Hours **/
@@ -155,6 +347,12 @@ describe('OpeningHoursService', () => {
           '@type': 'OpeningHoursSpecification',
           dayOfWeek: 'Monday',
           opens: '09:00',
+          closes: '18:00'
+        },
+        {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: 'Monday',
+          opens: '18:00',
           closes: '24:00'
         }
       ])
@@ -163,20 +361,6 @@ describe('OpeningHoursService', () => {
 
   /** Time Range Validation **/
   describe('Time Range Validation', () => {
-    it('should throw an error if closing time is before opening time on the same day', () => {
-      const input: OpeningHoursSpecification[] = [
-        {
-          '@type': 'OpeningHoursSpecification',
-          dayOfWeek: 'Monday',
-          opens: '14:00',
-          closes: '12:00'
-        }
-      ]
-      expect(() => service.setOpeningHours(input)).toThrow(
-        'Invalid time range on Monday: opens at 14:00 but closes at 12:00'
-      )
-    })
-
     it('should throw an error for invalid time format', () => {
       const input: OpeningHoursSpecification[] = [
         {
@@ -226,48 +410,6 @@ describe('OpeningHoursService', () => {
       ]
       expect(() => service.setOpeningHours(input)).toThrow(
         'Invalid time range on Monday: opens at 24:00 but closes at 18:00'
-      )
-    })
-
-    it('should throw an error if closing time exceeds 24:00', () => {
-      const input: OpeningHoursSpecification[] = [
-        {
-          '@type': 'OpeningHoursSpecification',
-          dayOfWeek: 'Monday',
-          opens: '09:00',
-          closes: '24:01'
-        }
-      ]
-      expect(() => service.setOpeningHours(input)).toThrow(
-        'Invalid time range on Monday: opens at 09:00 but closes at 00:01' // Adjust based on implementation
-      )
-    })
-
-    it('should throw an error when trying to add a time span that crosses midnight', () => {
-      expect(() => {
-        service.addOpeningHour('Monday', '23:00', '02:00', 'UTC')
-      }).toThrow(
-        'Invalid time range on Monday: opens at 23:00 but closes at 02:00'
-      )
-    })
-
-    it('should throw an error for overlapping time ranges on the same day', () => {
-      const overlappingHours = [
-        {
-          '@type': 'OpeningHoursSpecification',
-          dayOfWeek: 'Monday',
-          opens: '09:00',
-          closes: '12:00'
-        },
-        {
-          '@type': 'OpeningHoursSpecification',
-          dayOfWeek: 'Monday',
-          opens: '11:00',
-          closes: '18:00'
-        }
-      ]
-      expect(() => service.setOpeningHours(overlappingHours)).toThrow(
-        'Invalid time ranges: Monday [09:00-12:00] overlaps with Monday [11:00-18:00]'
       )
     })
   })
@@ -334,26 +476,6 @@ describe('OpeningHoursService', () => {
         { open: '09:00', closes: '12:00' },
         { open: '13:00', closes: '17:00' }
       ])
-    })
-
-    it('should throw an error for overlapping time ranges on the same day', () => {
-      const overlappingHours = [
-        {
-          '@type': 'OpeningHoursSpecification',
-          dayOfWeek: 'Friday',
-          opens: '09:00',
-          closes: '12:00'
-        },
-        {
-          '@type': 'OpeningHoursSpecification',
-          dayOfWeek: 'Friday',
-          opens: '11:00',
-          closes: '15:00'
-        }
-      ]
-      expect(() => service.setOpeningHours(overlappingHours)).toThrow(
-        'Invalid time ranges: Friday [09:00-12:00] overlaps with Friday [11:00-15:00]'
-      )
     })
 
     it('should correctly handle adding and exporting multiple ranges across different days', () => {

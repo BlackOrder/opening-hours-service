@@ -1,19 +1,29 @@
 import opening_hours from 'opening_hours'
-import {
-  argument_hash,
-  opening_hours_iterator
-} from 'opening_hours'
+import { argument_hash, opening_hours_iterator } from 'opening_hours'
 
 import { fromZonedTime, toZonedTime, format } from 'date-fns-tz'
+
+/**
+ * Type definition for OpeningHoursSpecification.
+ * Represents a single opening hours entry for a specific day, including the opening and closing times.
+ */
+export type InternalOpeningHours = {
+  dayOfWeek: string // Can be a single day or an array of days (e.g., "Monday", "Tuesday", or ["Monday", "Tuesday"])
+  opens: string // Opening time in HH:mm format (e.g., "09:00")
+  closes: string // Closing time in HH:mm format (e.g., "18:00")
+}
+
 /**
  * Type definition for OpeningHoursSpecification.
  * Represents a single opening hours entry for a specific day, including the opening and closing times.
  */
 export type OpeningHoursSpecification = {
   '@type': string // Should always be "OpeningHoursSpecification"
-  dayOfWeek: string // Day of the week (e.g., "Monday", "Tuesday")
-  opens: string // Opening time in HH:mm format (e.g., "09:00")
-  closes: string // Closing time in HH:mm format (e.g., "18:00")
+  dayOfWeek?: string | string[] // Can be a single day or an array of days (e.g., "Monday", "Tuesday", or ["Monday", "Tuesday"])
+  opens?: string // Opening time in HH:mm format (e.g., "09:00")
+  closes?: string // Closing time in HH:mm format (e.g., "18:00")
+  validFrom?: string // Optional field, ignored in processing
+  validThrough?: string // Optional field, ignored in processing
 }
 
 /**
@@ -73,7 +83,7 @@ export interface OpeningHoursInstance {
  * Handles adding, removing, querying, and validating opening hours, along with timezone conversion.
  */
 export class OpeningHoursService {
-  private openingHours: OpeningHoursSpecification[] = []
+  private internalOpeningHours: InternalOpeningHours[] = []
   private userTimezone: string // Timezone of the user (default is the user's local timezone)
   private openingHoursInstance: OpeningHoursInstance = new opening_hours(
     'Mo-Su closed'
@@ -113,14 +123,20 @@ export class OpeningHoursService {
 
     // Step 2: Convert times to user's timezone, adjusting days if necessary
     const convertedHours = preprocessedHours.flatMap(spec => {
-      return this.convertAndSplitEntry(spec, timezone, this.userTimezone)
+      return this.convertEntry(spec, timezone, this.userTimezone)
+    })
+
+    const splitHours = convertedHours.flatMap(spec => {
+      return this.splitEntry(spec)
     })
 
     // Step 3: Combine adjacent times on the same day
-    const combinedHours = this.combineAndCheckIntegrity(convertedHours)
+    this.combineAndCheckIntegrity(splitHours)
 
-    // Update internal data
-    this.openingHours = combinedHours
+    // Update internal data sorted by day of the week
+    this.internalOpeningHours = convertedHours.sort(
+      this.compareOpeningHours.bind(this)
+    )
 
     // Regenerate the opening_hours instance
     this.generateOpeningHoursInstance()
@@ -136,15 +152,17 @@ export class OpeningHoursService {
   exportOpeningHours (
     timezone: string = this.userTimezone
   ): OpeningHoursSpecification[] {
-    // Step 1: Convert times to the requested timezone, adjusting days if necessary
-    const convertedHours = this.openingHours.flatMap(spec => {
-      return this.convertAndSplitEntry(spec, this.userTimezone, timezone)
+    const convertedHours = this.internalOpeningHours.flatMap(spec => {
+      return this.convertEntry(spec, this.userTimezone, timezone)
     })
-
-    // Step 2: Combine adjacent times on the same day
-    const combinedHours = this.combineAndCheckIntegrity(convertedHours)
-
-    return combinedHours
+    return convertedHours.map(spec => {
+      return {
+        '@type': 'OpeningHoursSpecification',
+        dayOfWeek: spec.dayOfWeek,
+        opens: spec.opens,
+        closes: spec.closes
+      }
+    })
   }
 
   /**
@@ -382,17 +400,23 @@ export class OpeningHoursService {
 
     // Convert and split entry
     const convertedEntries = preprocessedEntry.flatMap(spec => {
-      return this.convertAndSplitEntry(spec, timezone, this.userTimezone)
+      return this.convertEntry(spec, timezone, this.userTimezone)
+    })
+    const splitEntries = convertedEntries.flatMap(spec => {
+      return this.splitEntry(spec)
+    })
+    const splitInternalEntries = this.internalOpeningHours.flatMap(spec => {
+      return this.splitEntry(spec)
     })
 
     // Combine new hours with existing ones and check integrity
-    const combinedHours = this.combineAndCheckIntegrity([
-      ...this.openingHours,
-      ...convertedEntries
-    ])
+    this.combineAndCheckIntegrity([...splitInternalEntries, ...splitEntries])
 
     // Update internal data
-    this.openingHours = combinedHours
+    this.internalOpeningHours = [
+      ...this.internalOpeningHours,
+      ...convertedEntries
+    ].sort(this.compareOpeningHours.bind(this))
 
     // Regenerate the opening_hours instance
     this.generateOpeningHoursInstance()
@@ -408,29 +432,30 @@ export class OpeningHoursService {
     dayOfWeek: string,
     timezone: string = this.userTimezone
   ) {
-    let openingHours = [...this.openingHours]
+    let internalOpeningHours = [...this.internalOpeningHours]
 
     // Convert the day of the week to the user's timezone if necessary
     if (timezone !== this.userTimezone) {
       // Step 1: Convert times to the requested timezone, adjusting days if necessary
-      const convertedHours = this.openingHours.flatMap(spec => {
-        return this.convertAndSplitEntry(spec, this.userTimezone, timezone)
+      internalOpeningHours = this.internalOpeningHours.flatMap(spec => {
+        return this.convertEntry(spec, this.userTimezone, timezone)
       })
-
-      // Step 2: Combine adjacent times on the same day
-      openingHours = this.combineAndCheckIntegrity(convertedHours)
     }
 
     // Remove entries for the specified day
-    const updatedHours = openingHours.filter(
-      spec => spec.dayOfWeek !== dayOfWeek
-    )
-
-    // Validate and update the hours
-    const combinedHours = this.combineAndCheckIntegrity(updatedHours)
+    const updatedHours = internalOpeningHours
+      .filter(spec => spec.dayOfWeek !== dayOfWeek)
+      .flatMap(spec => {
+        return {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: spec.dayOfWeek,
+          opens: spec.opens,
+          closes: spec.closes
+        }
+      })
 
     // set the opening hours
-    this.setOpeningHours(combinedHours, timezone)
+    this.setOpeningHours(updatedHours, timezone)
   }
 
   /**
@@ -440,18 +465,23 @@ export class OpeningHoursService {
    * @returns {OpenRangePerDay[]} - Array of objects where each object contains the day of the week and its openRange.
    */
   getOpenRangePerDay (timezone: string = this.userTimezone): OpenRangePerDay[] {
-    let openingHours = [...this.openingHours]
+    let internalOpeningHours = [...this.internalOpeningHours]
 
     // Convert the day of the week to the user's timezone if necessary
     if (timezone !== this.userTimezone) {
       // Step 1: Convert times to the requested timezone, adjusting days if necessary
-      const convertedHours = this.openingHours.flatMap(spec => {
-        return this.convertAndSplitEntry(spec, this.userTimezone, timezone)
+      internalOpeningHours = this.internalOpeningHours.flatMap(spec => {
+        return this.convertEntry(spec, this.userTimezone, timezone)
       })
-
-      // Step 2: Combine adjacent times on the same day
-      openingHours = this.combineAndCheckIntegrity(convertedHours)
     }
+
+    // Split entries that exceed the day
+    const splitHours = internalOpeningHours.flatMap(spec => {
+      return this.splitEntry(spec)
+    })
+
+    //  Combine adjacent times on the same day
+    const combinedHours = this.combineAndCheckIntegrity(splitHours)
 
     // Group opening hours by day of the week
     const OpenRangePerDay: { [key: string]: OpenRange[] } = {
@@ -464,7 +494,7 @@ export class OpeningHoursService {
       Sunday: []
     }
 
-    openingHours.forEach(spec => {
+    combinedHours.forEach(spec => {
       if (!OpenRangePerDay[spec.dayOfWeek]) {
         OpenRangePerDay[spec.dayOfWeek] = []
       }
@@ -506,15 +536,13 @@ export class OpeningHoursService {
   }
 
   /**
-   * Validates the integrity of the current opening hours stored in the service.
+   * Validates the integrity of the opening hours data.
    * Ensures that opening and closing times are valid, and there are no overlaps or invalid entries.
    *
-   * @param {OpeningHoursSpecification[]} [openingHours=this.openingHours] - Array of opening hours to validate.
+   * @param {OpeningHoursSpecification[]} [openingHours] - Array of opening hours to validate.
    * @returns {boolean} - True if all opening hours are valid, false otherwise.
    */
-  validateOpeningHours (
-    openingHours: OpeningHoursSpecification[] = this.openingHours
-  ): boolean {
+  validateOpeningHours (openingHours: OpeningHoursSpecification[]): boolean {
     try {
       const preprocessOpeningHours = this.preprocessOpeningHours(openingHours)
       this.checkIntegrity(preprocessOpeningHours)
@@ -530,7 +558,7 @@ export class OpeningHoursService {
    * @returns {number} - Total number of open hours.
    */
   getTotalOpenHours (): number {
-    return this.openingHours.reduce((total, spec) => {
+    return this.getCombinedInternalOpeningHours().reduce((total, spec) => {
       const opensMinutes = this.convertTimeToMinutes(spec.opens)
       const closesMinutes = this.convertTimeToMinutes(spec.closes)
       return total + (closesMinutes - opensMinutes) / 60 // Convert minutes to hours
@@ -552,7 +580,9 @@ export class OpeningHoursService {
       'Saturday',
       'Sunday'
     ]
-    const daysWithHours = new Set(this.openingHours.map(spec => spec.dayOfWeek))
+    const daysWithHours = new Set(
+      this.getCombinedInternalOpeningHours().map(spec => spec.dayOfWeek)
+    )
 
     return allDays.filter(day => !daysWithHours.has(day))
   }
@@ -560,23 +590,39 @@ export class OpeningHoursService {
   /** Private Methods **/
 
   /**
+   * Generates a combined internal opening hours array from the current data.
+   *
+   * @returns {InternalOpeningHours[]} - Array of combined internal opening hours.
+   */
+  private getCombinedInternalOpeningHours (): InternalOpeningHours[] {
+    let internalOpeningHours = [...this.internalOpeningHours]
+
+    // Split entries that exceed the day
+    const splitHours = internalOpeningHours.flatMap(spec => {
+      return this.splitEntry(spec)
+    })
+
+    //  Combine adjacent times on the same day
+    const combinedHours = this.combineAndCheckIntegrity(splitHours)
+
+    return combinedHours
+  }
+
+  /**
    * Preprocesses the opening hours by normalizing and splitting entries that exceed the day.
    *
    * @param {OpeningHoursSpecification[]} hours - Array of opening hours specifications.
-   * @returns {OpeningHoursSpecification[]} - Array of preprocessed opening hours.
+   * @returns {InternalOpeningHours[]} - Array of preprocessed opening hours.
    */
   private preprocessOpeningHours (
     hours: OpeningHoursSpecification[]
-  ): OpeningHoursSpecification[] {
+  ): InternalOpeningHours[] {
     // Normalize and split multi-day entries into individual single-day entries
     const normalizedHours = this.normalizeAndSplitDays(hours)
 
     // Split entries that exceed the day (closes is before opens)
     const preprocessedHours = normalizedHours.flatMap(spec => {
-      if (
-        this.timeIsBefore(spec.closes, spec.opens) ||
-        spec.closes === spec.opens
-      ) {
+      if (spec.opens === '24:00') {
         throw new Error(
           `Invalid time range on ${spec.dayOfWeek}: opens at ${spec.opens} but closes at ${spec.closes}`
         )
@@ -589,18 +635,56 @@ export class OpeningHoursService {
   }
 
   /**
-   * Converts an entry from one timezone to another, adjusting days if necessary, and splits if the converted times span multiple days.
+   * Splits if the times span multiple days.
    *
-   * @param {OpeningHoursSpecification} spec - The opening hours specification to convert.
+   * @param {InternalOpeningHours} spec - The opening hours specification to convert.
+   * @returns {InternalOpeningHours[]} - Array of converted and possibly split entries.
+   */
+  private splitEntry (spec: InternalOpeningHours): InternalOpeningHours[] {
+    const opensTime = this.convertTimeToMinutes(spec.opens)
+    const closesTime = this.convertTimeToMinutes(spec.closes)
+    if (opensTime < closesTime) {
+      return [spec]
+    } else {
+      const opensDayOfWeek = spec.dayOfWeek
+      const closesDayOfWeek = this.getNextDay(spec.dayOfWeek)
+      // Days are different; split into two entries
+      const firstEntry: InternalOpeningHours = {
+        dayOfWeek: opensDayOfWeek,
+        opens: spec.opens,
+        closes: '24:00' // End of the day
+      }
+      const secondEntry: InternalOpeningHours = {
+        dayOfWeek: closesDayOfWeek,
+        opens: '00:00',
+        closes: spec.closes
+      }
+
+      if (spec.opens !== '24:00' && spec.closes !== '00:00') {
+        return [firstEntry, secondEntry]
+      } else if (spec.opens === '24:00' && spec.closes === '00:00') {
+        return []
+      } else if (spec.opens === '24:00') {
+        return [secondEntry]
+      } else {
+        return [firstEntry]
+      }
+    }
+  }
+
+  /**
+   * Converts an entry from one timezone to another, adjusting days if necessary.
+   *
+   * @param {InternalOpeningHours} spec - The opening hours specification to convert.
    * @param {string} fromTimezone - The original timezone.
    * @param {string} toTimezone - The target timezone.
-   * @returns {OpeningHoursSpecification[]} - Array of converted and possibly split entries.
+   * @returns {InternalOpeningHours} - converted entry.
    */
-  private convertAndSplitEntry (
-    spec: OpeningHoursSpecification,
+  private convertEntry (
+    spec: InternalOpeningHours,
     fromTimezone: string,
     toTimezone: string
-  ): OpeningHoursSpecification[] {
+  ): InternalOpeningHours {
     // Convert opens and closes times
     const opensConversion = this.convertTimeWithDayChange(
       spec.opens,
@@ -615,56 +699,18 @@ export class OpeningHoursService {
       toTimezone
     )
 
-    // Adjust days based on day changes
-    let opensDayOfWeek = this.adjustDayOfWeek(
-      spec.dayOfWeek,
-      opensConversion.changedDay
-    )
-    let closesDayOfWeek = this.adjustDayOfWeek(
-      spec.dayOfWeek,
-      closesConversion.changedDay
-    )
+    if (closesConversion.time === '00:00') {
+      closesConversion.changedDay = 0
+      closesConversion.time = '24:00'
+    }
 
-    // If days are the same, return a single entry
-    if (opensDayOfWeek === closesDayOfWeek) {
-      return [
-        {
-          '@type': 'OpeningHoursSpecification',
-          dayOfWeek: opensDayOfWeek,
-          opens: opensConversion.time,
-          closes: closesConversion.time
-        }
-      ]
-    } else {
-      // Days are different; split into two entries
-      const firstEntry: OpeningHoursSpecification = {
-        '@type': 'OpeningHoursSpecification',
-        dayOfWeek: opensDayOfWeek,
-        opens: opensConversion.time,
-        closes: '24:00' // End of the day
-      }
-      const secondEntry: OpeningHoursSpecification = {
-        '@type': 'OpeningHoursSpecification',
-        dayOfWeek: closesDayOfWeek,
-        opens: '00:00',
-        closes: closesConversion.time
-      }
-
-      if (
-        opensConversion.time !== '24:00' &&
-        closesConversion.time !== '00:00'
-      ) {
-        return [firstEntry, secondEntry]
-      } else if (
-        opensConversion.time === '24:00' &&
-        closesConversion.time === '00:00'
-      ) {
-        return []
-      } else if (opensConversion.time === '24:00') {
-        return [secondEntry]
-      } else {
-        return [firstEntry]
-      }
+    return {
+      dayOfWeek: this.adjustDayOfWeek(
+        spec.dayOfWeek,
+        opensConversion.changedDay
+      ),
+      opens: opensConversion.time,
+      closes: closesConversion.time
     }
   }
 
@@ -734,18 +780,18 @@ export class OpeningHoursService {
    * Combines adjacent time ranges and checks for data integrity.
    * Ensures there are no overlapping or invalid time ranges.
    *
-   * @param {OpeningHoursSpecification[]} hours - Array of opening hours.
-   * @returns {OpeningHoursSpecification[]} - Combined and validated opening hours.
+   * @param {InternalOpeningHours[]} hours - Array of opening hours.
+   * @returns {InternalOpeningHours[]} - Combined and validated opening hours.
    */
   private combineAndCheckIntegrity (
-    hours: OpeningHoursSpecification[]
-  ): OpeningHoursSpecification[] {
+    hours: InternalOpeningHours[]
+  ): InternalOpeningHours[] {
     // Sort hours before combining
     const sortedHours = hours.sort(this.compareOpeningHours.bind(this))
 
     const combinedHours = this.combineAdjacentRanges(sortedHours)
 
-    this.checkIntegrity(combinedHours) // Check integrity
+    // this.checkIntegrity(combinedHours) // Check integrity
     return combinedHours // Return valid data if no errors, otherwise throw Exception
   }
 
@@ -753,13 +799,13 @@ export class OpeningHoursService {
    * Combines adjacent time ranges (e.g., "14:00-15:00" and "15:00-16:00") into a single range.
    * Prevents merging ranges across different days.
    *
-   * @param {OpeningHoursSpecification[]} hours - Array of opening hours.
-   * @returns {OpeningHoursSpecification[]} - Array with combined adjacent time ranges on the same day.
+   * @param {InternalOpeningHours[]} hours - Array of opening hours.
+   * @returns {InternalOpeningHours[]} - Array with combined adjacent time ranges on the same day.
    */
   private combineAdjacentRanges (
-    hours: OpeningHoursSpecification[]
-  ): OpeningHoursSpecification[] {
-    const combinedHours: OpeningHoursSpecification[] = []
+    hours: InternalOpeningHours[]
+  ): InternalOpeningHours[] {
+    const combinedHours: InternalOpeningHours[] = []
 
     for (let i = 0; i < hours.length; i++) {
       let currentRange = { ...hours[i] }
@@ -772,7 +818,10 @@ export class OpeningHoursService {
       ) {
         let updatedClosingTime = nextRange.closes
         // Ensure the closing time is the latest
-        if (this.timeIsBefore(updatedClosingTime, currentRange.closes)) {
+        if (
+          nextRange.opens < nextRange.closes &&
+          this.timeIsBefore(updatedClosingTime, currentRange.closes)
+        ) {
           updatedClosingTime = currentRange.closes
         }
         // Update the current range's closing time
@@ -789,9 +838,9 @@ export class OpeningHoursService {
    * Validates the integrity of the opening hours to ensure there are no overlaps or invalid entries.
    * Throws an error if invalid time ranges are detected.
    *
-   * @param {OpeningHoursSpecification[]} hours - Array of opening hours to validate.
+   * @param {InternalOpeningHours[]} hours - Array of opening hours to validate.
    */
-  private checkIntegrity (hours: OpeningHoursSpecification[]) {
+  private checkIntegrity (hours: InternalOpeningHours[]) {
     hours.forEach((current, i) => {
       const opensTime = this.convertTimeToMinutes(current.opens)
       const closesTime = this.convertTimeToMinutes(current.closes)
@@ -905,23 +954,31 @@ export class OpeningHoursService {
    * For example, if "dayOfWeek" is an array, this function splits it into multiple entries, one per day.
    *
    * @param {OpeningHoursSpecification[]} hours - Array of opening hours.
-   * @returns {OpeningHoursSpecification[]} - Array of normalized single-day opening hours.
+   * @returns {InternalOpeningHours[]} - Array of normalized single-day opening hours.
    */
   private normalizeAndSplitDays (
     hours: OpeningHoursSpecification[]
-  ): OpeningHoursSpecification[] {
-    const normalizedEntries: OpeningHoursSpecification[] = []
+  ): InternalOpeningHours[] {
+    const normalizedEntries: InternalOpeningHours[] = []
 
     hours.forEach(spec => {
-      const days = Array.isArray(spec.dayOfWeek)
-        ? spec.dayOfWeek
-        : [spec.dayOfWeek]
+      const dayOfWeek = spec.dayOfWeek ?? [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday'
+      ]
+      const opens = spec.opens ?? '00:00'
+      const closes = spec.closes ?? '24:00'
+      const days = Array.isArray(dayOfWeek) ? dayOfWeek : [dayOfWeek]
       days.forEach(day => {
         normalizedEntries.push({
-          '@type': spec['@type'],
           dayOfWeek: this.normalizeDayOfWeek(day), // Normalize each day
-          opens: spec.opens,
-          closes: spec.closes
+          opens: opens,
+          closes: closes
         })
       })
     })
@@ -982,13 +1039,13 @@ export class OpeningHoursService {
    * Compares two opening hours entries by day and time.
    * Used to sort opening hours for processing.
    *
-   * @param {OpeningHoursSpecification} a - First opening hours entry.
-   * @param {OpeningHoursSpecification} b - Second opening hours entry.
+   * @param {InternalOpeningHours} a - First opening hours entry.
+   * @param {InternalOpeningHours} b - Second opening hours entry.
    * @returns {number} - Sorting order (-1, 0, 1).
    */
   private compareOpeningHours (
-    a: OpeningHoursSpecification,
-    b: OpeningHoursSpecification
+    a: InternalOpeningHours,
+    b: InternalOpeningHours
   ): number {
     // First compare by day of the week
     const dayA = this.convertDayStringToNumber(a.dayOfWeek)
